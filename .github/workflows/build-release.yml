@@ -36,11 +36,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # --publish never is CRITICAL:
+      # Without it, electron-builder tries to call the GitHub Releases API
+      # during the build step to check for existing releases — causing a 404
+      # because the release doesn't exist yet. We build artifacts here only;
+      # the release job below handles all GitHub API calls.
       - name: Build macOS DMG (x64 + arm64)
-        run: npm run build:mac
+        run: npx electron-builder --mac --x64 --arm64 --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code signing (optional — remove if you don't have a cert)
+          # Code signing — optional. Uncomment and add these as repo secrets
+          # if you have an Apple Developer certificate. Without signing,
+          # macOS Gatekeeper shows a warning on first launch (Open Anyway).
           # CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
           # CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
           # APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -57,6 +63,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/latest-mac.yml
+          if-no-files-found: error
           retention-days: 5
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -79,11 +86,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Same --publish never fix as the macOS job above.
       - name: Build Windows installer
-        run: npm run build:win
+        run: npx electron-builder --win --x64 --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code signing (optional — remove if you don't have a cert)
+          # Code signing — optional. Uncomment and add repo secrets
+          # if you have a Windows code-signing certificate.
           # WIN_CSC_LINK: ${{ secrets.WIN_CERT_P12_BASE64 }}
           # WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
 
@@ -97,10 +105,11 @@ jobs:
           path: |
             dist/*.exe
             dist/latest.yml
+          if-no-files-found: error
           retention-days: 5
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Job 3: Create GitHub Release (runs after both builds succeed)
+  # Job 3: Create GitHub Release (runs only after BOTH builds succeed)
   # ─────────────────────────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
@@ -132,23 +141,27 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           else
+            # Strip the leading 'v' from the tag (v1.0.0 → 1.0.0)
             echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Read release notes
+      - name: Extract release notes from CHANGELOG.md
         id: release_notes
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
-          # Extract the block for this version from CHANGELOG.md
+          # Pull the section for this version out of CHANGELOG.md
           NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
           if [ -z "$NOTES" ]; then
             NOTES="See [CHANGELOG.md](CHANGELOG.md) for full details."
           fi
-          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Use multiline output syntax
+          {
+            echo "NOTES<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name || format('v{0}', steps.get_version.outputs.VERSION) }}
@@ -164,17 +177,17 @@ jobs:
 
             | Platform | File | Notes |
             |----------|------|-------|
-            | 🍎 macOS (Apple Silicon + Intel) | `Pharmacy.PRQ.Tool-${{ steps.get_version.outputs.VERSION }}.dmg` | Universal binary |
-            | 🪟 Windows 10/11 | `Pharmacy.PRQ.Tool-Setup-${{ steps.get_version.outputs.VERSION }}.exe` | NSIS installer |
+            | 🍎 macOS (Apple Silicon + Intel) | `.dmg` file below | Universal binary — works on M1/M2/M3 and Intel |
+            | 🪟 Windows 10 / 11 | `Setup.exe` file below | NSIS installer — 64-bit |
 
             ### ⚡ Quick Start
-            - **macOS:** Open the `.dmg`, drag the app to `/Applications`, then open it.
-            - **Windows:** Run the `.exe` installer, follow the setup wizard.
-
-            > **First run on macOS?** If Gatekeeper blocks the app, go to System Settings → Privacy & Security and click **Open Anyway**.
+            - **macOS:** Open the `.dmg`, drag the app to `/Applications`, launch it.  
+              _Gatekeeper warning?_ → System Settings → Privacy & Security → **Open Anyway**
+            - **Windows:** Run the `Setup.exe`, follow the wizard. Desktop shortcut created automatically.
 
           files: release-assets/*
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

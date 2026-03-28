@@ -11,11 +11,10 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "build:mac": "electron-builder --mac --x64 --arm64",
-    "build:win": "electron-builder --win --x64",
-    "build:linux": "electron-builder --linux",
-    "build:all": "electron-builder --mac --win --linux",
-    "postinstall": "electron-builder install-app-deps"
+    "build:mac": "electron-builder --mac --x64 --arm64 --publish never",
+    "build:win": "electron-builder --win --x64 --publish never",
+    "build:linux": "electron-builder --linux --publish never",
+    "build:all": "electron-builder --mac --win --linux --publish never"
   },
   "build": {
     "appId": "com.sepl.pharmacy.prq",
@@ -30,11 +29,6 @@
       "node_modules/**/*",
       "package.json"
     ],
-    "publish": {
-      "provider": "github",
-      "owner": "adisharma-git",
-      "repo": "pharmacy-prq-tool"
-    },
     "mac": {
       "target": [
         { "target": "dmg", "arch": ["x64", "arm64"] }
