@@ -1,0 +1,75 @@
+{
+  "name": "pharmacy-prq-tool",
+  "version": "1.0.0",
+  "description": "Pharmacy PRQ Input Sheet Generator + Browser Launcher — SEPL / Amrita Hospital Faridabad",
+  "main": "src/main.js",
+  "author": {
+    "name": "SEPL Pharmacy Operations",
+    "email": "pharmacy@sepl.in"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:mac": "electron-builder --mac --x64 --arm64",
+    "build:win": "electron-builder --win --x64",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --mac --win --linux",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.sepl.pharmacy.prq",
+    "productName": "Pharmacy PRQ Tool",
+    "copyright": "Copyright © 2026 SEPL Pharmacy Operations",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "adisharma-git",
+      "repo": "pharmacy-prq-tool"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.utilities",
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "window": { "width": 540, "height": 380 }
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pharmacy PRQ Tool"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "puppeteer": "^22.0.0",
+    "xlsx": "^0.18.5",
+    "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

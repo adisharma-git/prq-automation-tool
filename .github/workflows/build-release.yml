@@ -1,0 +1,180 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'        # triggers on version tags: v1.0.0, v1.2.3, etc.
+  workflow_dispatch:    # allows manual trigger from GitHub UI
+    inputs:
+      version:
+        description: 'Version to release (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write       # needed to create GitHub Releases
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1: Build macOS (.dmg — universal: x64 + arm64)
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-mac:
+    name: Build macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS DMG (x64 + arm64)
+        run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code signing (optional — remove if you don't have a cert)
+          # CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: List dist output
+        run: ls -lh dist/
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dist
+          path: |
+            dist/*.dmg
+            dist/latest-mac.yml
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2: Build Windows (.exe NSIS installer)
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code signing (optional — remove if you don't have a cert)
+          # WIN_CSC_LINK: ${{ secrets.WIN_CERT_P12_BASE64 }}
+          # WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+
+      - name: List dist output
+        run: dir dist
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-dist
+          path: |
+            dist/*.exe
+            dist/latest.yml
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 3: Create GitHub Release (runs after both builds succeed)
+  # ─────────────────────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-dist
+          path: release-assets/
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: win-dist
+          path: release-assets/
+
+      - name: List release assets
+        run: ls -lh release-assets/
+
+      - name: Extract version from tag or input
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Read release notes
+        id: release_notes
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          # Extract the block for this version from CHANGELOG.md
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="See [CHANGELOG.md](CHANGELOG.md) for full details."
+          fi
+          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || format('v{0}', steps.get_version.outputs.VERSION) }}
+          name: "Pharmacy PRQ Tool v${{ steps.get_version.outputs.VERSION }}"
+          body: |
+            ## Pharmacy PRQ Tool — v${{ steps.get_version.outputs.VERSION }}
+
+            ${{ steps.release_notes.outputs.NOTES }}
+
+            ---
+
+            ### 📦 Download
+
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | 🍎 macOS (Apple Silicon + Intel) | `Pharmacy.PRQ.Tool-${{ steps.get_version.outputs.VERSION }}.dmg` | Universal binary |
+            | 🪟 Windows 10/11 | `Pharmacy.PRQ.Tool-Setup-${{ steps.get_version.outputs.VERSION }}.exe` | NSIS installer |
+
+            ### ⚡ Quick Start
+            - **macOS:** Open the `.dmg`, drag the app to `/Applications`, then open it.
+            - **Windows:** Run the `.exe` installer, follow the setup wizard.
+
+            > **First run on macOS?** If Gatekeeper blocks the app, go to System Settings → Privacy & Security and click **Open Anyway**.
+
+          files: release-assets/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

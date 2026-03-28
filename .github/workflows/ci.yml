@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check package.json validity
+        run: node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('✅ package.json valid')"
+
+      - name: Validate source files exist
+        run: |
+          for f in src/main.js src/preload.js src/index.html src/prq-worker.js src/puppeteer-worker.js; do
+            [ -f "$f" ] && echo "✅ $f" || (echo "❌ Missing: $f" && exit 1)
+          done
+
+      - name: Syntax check all JS files
+        run: |
+          for f in src/main.js src/preload.js src/prq-worker.js src/puppeteer-worker.js; do
+            node --check "$f" && echo "✅ Syntax OK: $f"
+          done
+
+      - name: Validate PRQ worker logic (dry-run)
+        run: |
+          node -e "
+            const fs = require('fs');
+            const src = fs.readFileSync('src/prq-worker.js', 'utf8');
+            // Check all critical spec v6.0 constants are present
+            const checks = [
+              ['NO_SPLIT',           'Split condition NO_SPLIT'],
+              ['ALWAYS_SPLIT',       'Split condition ALWAYS_SPLIT'],
+              ['CONDITIONAL_SPLIT',  'Split condition CONDITIONAL_SPLIT'],
+              ['SUM(F2:F301)',        'PO Qty total formula'],
+              ['SUMPRODUCT',         'Value total formula'],
+              ['PRQ Input',          'Sheet name'],
+              ['A302:D302',          'TOTAL row merge'],
+              ['autoFilter',         'Auto-filter'],
+              ['frozen',             'Freeze panes'],
+            ];
+            let pass = true;
+            checks.forEach(([token, label]) => {
+              if (src.includes(token)) {
+                console.log('✅ ' + label);
+              } else {
+                console.error('❌ Missing: ' + label + ' (' + token + ')');
+                pass = false;
+              }
+            });
+            if (!pass) process.exit(1);
+          "
+
+      - name: Summary
+        run: echo "✅ All checks passed"
